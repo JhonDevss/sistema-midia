@@ -1,0 +1,176 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 0 0% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 8%;
+
+    --primary: 45 100% 50%;
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 0 0% 94%;
+    --secondary-foreground: 0 0% 15%;
+
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 45 100% 95%;
+    --accent-foreground: 45 100% 25%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 45 100% 50%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 25%;
+    --sidebar-primary: 45 100% 50%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 45 100% 95%;
+    --sidebar-accent-foreground: 0 0% 15%;
+    --sidebar-border: 0 0% 92%;
+    --sidebar-ring: 45 100% 50%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 45 100% 50%;
+    --warning-foreground: 0 0% 0%;
+    --info: 210 100% 50%;
+    --info-foreground: 0 0% 100%;
+  }
+
+  .dark {
+    --background: 0 0% 2%;
+    --foreground: 0 0% 93%;
+
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 93%;
+
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 93%;
+
+    --primary: 45 100% 50%;
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 93%;
+
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 55%;
+
+    --accent: 45 100% 10%;
+    --accent-foreground: 45 100% 70%;
+
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 93%;
+
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 45 100% 50%;
+
+    --sidebar-background: 0 0% 5%;
+    --sidebar-foreground: 0 0% 85%;
+    --sidebar-primary: 45 100% 50%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 0 0% 10%;
+    --sidebar-accent-foreground: 0 0% 93%;
+    --sidebar-border: 0 0% 12%;
+    --sidebar-ring: 45 100% 50%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 45 100% 50%;
+    --warning-foreground: 0 0% 0%;
+    --info: 210 100% 50%;
+    --info-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .status-badge-draft {
+    @apply bg-muted text-muted-foreground text-xs font-medium;
+  }
+  .status-badge-active {
+    @apply bg-primary text-primary-foreground text-xs font-medium;
+  }
+  .status-badge-finished {
+    @apply bg-secondary text-secondary-foreground text-xs font-medium;
+  }
+  .spreadsheet-cell {
+    @apply border-r border-b border-border px-3 py-2 text-sm;
+  }
+  .spreadsheet-header {
+    @apply border-r border-b border-border px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground bg-muted/50 whitespace-nowrap;
+  }
+  .spreadsheet-row-even {
+    @apply bg-card;
+  }
+  .spreadsheet-row-odd {
+    @apply bg-muted/20;
+  }
+
+  /* Page transitions */
+  .page-enter {
+    animation: fadeSlideIn 0.2s ease-out;
+  }
+
+  @keyframes fadeSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Role badge */
+  .role-dot {
+    @apply inline-block w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0;
+  }
+
+  /* Improved card hover */
+  .card-interactive {
+    @apply transition-all duration-200 hover:shadow-md hover:border-primary/30;
+  }
+
+  /* Empty state */
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-16 text-center;
+  }
+  .empty-state-icon {
+    @apply h-12 w-12 text-muted-foreground/30 mb-4;
+  }
+  .empty-state-title {
+    @apply text-lg font-medium text-muted-foreground mb-1;
+  }
+  .empty-state-desc {
+    @apply text-sm text-muted-foreground/70 mb-6 max-w-sm;
+  }
+}
