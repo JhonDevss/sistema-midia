@@ -88,6 +88,18 @@ export interface Participant {
   createdAt: string;
 }
 
+export interface EventPresence {
+  userId: string;
+  username: string;
+  color: string;
+  isTyping: boolean;
+  selection: {
+    participantId: string;
+    columnName: string;
+  } | null;
+  updatedAt: string;
+}
+
 export interface TopParticipantByDiscordId {
   discordId: string;
   participations: number;

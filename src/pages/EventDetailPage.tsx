@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -27,12 +27,14 @@ export default function EventDetailPage() {
   const navigate = useNavigate();
   const {
     events, getEventParticipants, changeEventStatus, addRound,
-    addParticipant, removeParticipant, updateParticipantRole, updateScore, deleteEvent, subscribeToEvent
+    addParticipant, removeParticipant, updateParticipantRole, updateScore, deleteEvent, subscribeToEvent,
+    getEventPresence, updatePresenceSelection
   } = useData();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
 
   const event = events.find(e => e.id === id);
   const participants = event ? getEventParticipants(event.id) : [];
+  const eventPresence = event ? getEventPresence(event.id) : [];
   const orderedParticipants = useMemo(() => {
     const list = [...participants];
     if (!event || event.status !== 'encerrado') {
@@ -49,6 +51,31 @@ export default function EventDetailPage() {
     });
   }, [event, participants]);
 
+  const collaboratorPresence = useMemo(
+    () => eventPresence.filter((presence) => presence.userId !== user?.id),
+    [eventPresence, user?.id]
+  );
+
+  const participantNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const participant of orderedParticipants) {
+      map.set(participant.id, participant.name);
+    }
+    return map;
+  }, [orderedParticipants]);
+
+  const cellPresenceMap = useMemo(() => {
+    const map = new Map<string, typeof collaboratorPresence>();
+    for (const presence of collaboratorPresence) {
+      if (!presence.selection) continue;
+      const key = `${presence.selection.participantId}::${presence.selection.columnName}`;
+      const list = map.get(key) || [];
+      list.push(presence);
+      map.set(key, list);
+    }
+    return map;
+  }, [collaboratorPresence]);
+
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDiscordId, setNewDiscordId] = useState('');
@@ -57,11 +84,30 @@ export default function EventDetailPage() {
   const [highlightRoleId, setHighlightRoleId] = useState<string>('all');
   const [confirmAction, setConfirmAction] = useState<'start' | 'end' | 'delete' | null>(null);
   const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>({});
+  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const typingActiveRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!id) return;
     return subscribeToEvent(id);
   }, [id, subscribeToEvent]);
+
+  useEffect(() => {
+    return () => {
+      for (const key of Object.keys(typingTimeoutsRef.current)) {
+        clearTimeout(typingTimeoutsRef.current[key]);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!event?.id) return;
+    return () => {
+      void updatePresenceSelection(event.id, null, false).catch(() => {
+        // Best-effort cleanup when leaving the page.
+      });
+    };
+  }, [event?.id, updatePresenceSelection]);
 
   if (!event) {
     return (
@@ -146,6 +192,42 @@ export default function EventDetailPage() {
       });
     } catch (error) {
       toast.error((error as Error).message || 'Erro ao atualizar pontuação');
+    }
+  };
+
+  const publishPresenceSelection = (selection: { participantId: string; columnName: string } | null, isTyping = false) => {
+    void updatePresenceSelection(event.id, selection, isTyping).catch(() => {
+      // Presence is best-effort and should not block scoring.
+    });
+  };
+
+  const clearTypingTimer = (cellKey: string) => {
+    const timer = typingTimeoutsRef.current[cellKey];
+    if (!timer) return;
+    clearTimeout(timer);
+    delete typingTimeoutsRef.current[cellKey];
+  };
+
+  const signalTyping = (participantId: string, columnName: string) => {
+    const cellKey = scoreDraftKey(participantId, columnName);
+
+    if (!typingActiveRef.current[cellKey]) {
+      typingActiveRef.current[cellKey] = true;
+      publishPresenceSelection({ participantId, columnName }, true);
+    }
+
+    clearTypingTimer(cellKey);
+    typingTimeoutsRef.current[cellKey] = setTimeout(() => {
+      typingActiveRef.current[cellKey] = false;
+      publishPresenceSelection({ participantId, columnName }, false);
+      clearTypingTimer(cellKey);
+    }, 1500);
+  };
+
+  const stopTyping = () => {
+    for (const key of Object.keys(typingTimeoutsRef.current)) {
+      clearTypingTimer(key);
+      typingActiveRef.current[key] = false;
     }
   };
 
@@ -291,6 +373,25 @@ export default function EventDetailPage() {
           )}
         </div>
       </div>
+
+      {collaboratorPresence.length > 0 && (
+        <div className="flex items-center gap-2 text-xs flex-wrap text-muted-foreground">
+          <span className="font-medium text-foreground">Editando agora:</span>
+          {collaboratorPresence.map((presence) => {
+            const selectionLabel = presence.selection
+              ? `${participantNameById.get(presence.selection.participantId) || 'Participante'} - ${presence.selection.columnName}`
+              : 'Navegando';
+            return (
+              <span key={presence.userId} className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 bg-card">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: presence.color }} />
+                <span className="font-medium text-foreground">{presence.username}</span>
+                {presence.isTyping && <span className="font-medium">digitando...</span>}
+                <span>{selectionLabel}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {/* Info bar */}
       <div className="flex items-center gap-6 text-sm flex-wrap">
@@ -506,18 +607,28 @@ export default function EventDetailPage() {
                           const highlightedWeight = highlightedRole ? (getRoleMetricWeight(highlightedRole.id, col.name) ?? 0) : null;
                           const dimByHighlight = highlightedRole ? highlightedWeight === 0 : false;
                           const showOverride = roleWeight !== undefined && roleWeight !== col.rankingWeight;
+                          const selectionKey = scoreDraftKey(p.id, col.name);
+                          const activePresence = cellPresenceMap.get(selectionKey) || [];
+                          const leadPresence = activePresence[0];
                           return (
                             <td
                               key={col.id}
                               className={`spreadsheet-cell p-0 relative ${dimByHighlight ? 'opacity-45' : ''} ${highlightedRole && !dimByHighlight ? 'bg-primary/5' : ''}`}
+                              style={leadPresence ? { boxShadow: `inset 0 0 0 2px ${leadPresence.color}` } : undefined}
                             >
                               {isEditable ? (
                                 <Input
                                   type={col.type === 'texto' ? 'text' : 'number'}
                                   value={getInputScoreValue(p.id, col.name, p.scores[col.name], col.type)}
-                                  onChange={e => handleScoreDraftChange(p.id, col.name, e.target.value)}
+                                  onChange={e => {
+                                    handleScoreDraftChange(p.id, col.name, e.target.value);
+                                    signalTyping(p.id, col.name);
+                                  }}
+                                  onFocus={() => publishPresenceSelection({ participantId: p.id, columnName: col.name }, false)}
                                   onBlur={() => {
                                     void commitScoreChange(p.id, col.name, col.type, p.scores[col.name]);
+                                    stopTyping();
+                                    publishPresenceSelection(null, false);
                                   }}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') {
@@ -539,6 +650,17 @@ export default function EventDetailPage() {
                                   title={`Peso da função: ×${roleWeight}`}
                                 >
                                   ×{roleWeight}
+                                </span>
+                              )}
+                              {leadPresence && (
+                                <span
+                                  className="absolute bottom-0 left-0 px-1 text-[9px] leading-tight text-white rounded-tr"
+                                  style={{ backgroundColor: leadPresence.color }}
+                                  title={activePresence.map(item => item.username).join(', ')}
+                                >
+                                  {activePresence.length > 1
+                                    ? `${leadPresence.username}${leadPresence.isTyping ? ' digitando' : ''} +${activePresence.length - 1}`
+                                    : `${leadPresence.username}${leadPresence.isTyping ? ' digitando' : ''}`}
                                 </span>
                               )}
                             </td>

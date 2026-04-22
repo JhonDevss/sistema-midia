@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useRef } from 'react';
-import { EventTemplate, GameEvent, Participant, EventStatus } from '@/types';
+import { EventTemplate, GameEvent, Participant, EventStatus, EventPresence } from '@/types';
 import { apiFetch, buildApiUrl } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -7,6 +7,7 @@ interface DataContextType {
   templates: EventTemplate[];
   events: GameEvent[];
   participants: Record<string, Participant[]>;
+  presence: Record<string, EventPresence[]>;
   isLoading: boolean;
   createTemplate: (t: Omit<EventTemplate, 'id' | 'createdAt'>) => Promise<EventTemplate>;
   updateTemplate: (id: string, t: Partial<EventTemplate>) => Promise<void>;
@@ -23,14 +24,21 @@ interface DataContextType {
   updateParticipantRole: (eventId: string, participantId: string, roleId: string | undefined) => Promise<void>;
   updateScore: (eventId: string, participantId: string, columnName: string, value: number | string) => Promise<void>;
   getEventParticipants: (eventId: string) => Participant[];
+  getEventPresence: (eventId: string) => EventPresence[];
+  updatePresenceSelection: (
+    eventId: string,
+    selection: { participantId: string; columnName: string } | null,
+    isTyping?: boolean
+  ) => Promise<void>;
   subscribeToEvent: (eventId: string) => () => void;
 }
 
 type EventStreamPayload = {
-  type: 'snapshot' | 'participants_updated' | 'event_updated' | 'event_deleted';
+  type: 'snapshot' | 'participants_updated' | 'event_updated' | 'event_deleted' | 'presence_updated';
   eventId: string;
   event?: GameEvent;
   participants?: Participant[];
+  presence?: EventPresence[];
   timestamp: string;
 };
 
@@ -41,6 +49,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [templates, setTemplates] = useState<EventTemplate[]>([]);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [participants, setParticipants] = useState<Record<string, Participant[]>>({});
+  const [presence, setPresence] = useState<Record<string, EventPresence[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const eventStreamsRef = useRef<Record<string, { source: EventSource; subscribers: number }>>({});
 
@@ -59,6 +68,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
         const { [payload.eventId]: _removed, ...rest } = prev;
         return rest;
       });
+      setPresence(prev => {
+        const { [payload.eventId]: _removed, ...rest } = prev;
+        return rest;
+      });
       return;
     }
 
@@ -72,6 +85,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     if (Array.isArray(payload.participants)) {
       setParticipants(prev => ({ ...prev, [payload.eventId]: payload.participants! }));
+    }
+
+    if (Array.isArray(payload.presence)) {
+      setPresence(prev => ({ ...prev, [payload.eventId]: payload.presence! }));
     }
   }, []);
 
@@ -110,6 +127,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     source.addEventListener('participants_updated', onPayload as EventListener);
     source.addEventListener('event_updated', onPayload as EventListener);
     source.addEventListener('event_deleted', onPayload as EventListener);
+    source.addEventListener('presence_updated', onPayload as EventListener);
 
     streams[eventId] = { source, subscribers: 1 };
 
@@ -144,6 +162,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setTemplates([]);
       setEvents([]);
       setParticipants({});
+      setPresence({});
       setIsLoading(false);
       return () => {
         mounted = false;
@@ -157,6 +176,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           setTemplates([]);
           setEvents([]);
           setParticipants({});
+          setPresence({});
         }
       })
       .finally(() => {
@@ -301,14 +321,34 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return participants[eventId] || [];
   }, [participants]);
 
+  const getEventPresence = useCallback((eventId: string) => {
+    return presence[eventId] || [];
+  }, [presence]);
+
+  const updatePresenceSelection = useCallback(async (
+    eventId: string,
+    selection: { participantId: string; columnName: string } | null,
+    isTyping = false
+  ) => {
+    await apiFetch<void>(`/api/data/events/${eventId}/presence`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        participantId: selection?.participantId ?? null,
+        columnName: selection?.columnName ?? null,
+        isTyping,
+      }),
+    });
+  }, []);
+
   return (
     <DataContext.Provider value={{
-      templates, events, participants,
+      templates, events, participants, presence,
       isLoading,
       createTemplate, updateTemplate, deleteTemplate, duplicateTemplate,
       createEvent, updateEvent, deleteEvent, duplicateEvent,
       changeEventStatus, addRound,
       addParticipant, removeParticipant, updateParticipantRole, updateScore, getEventParticipants,
+      getEventPresence, updatePresenceSelection,
       subscribeToEvent,
     }}>
       {children}
