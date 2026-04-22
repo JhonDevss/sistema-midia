@@ -17,8 +17,12 @@ export function setAuthUserId(userId: string | null) {
   localStorage.removeItem(AUTH_USER_ID_KEY);
 }
 
+export function buildApiUrl(path: string) {
+  return path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
+}
+
 export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
+  const url = buildApiUrl(path);
   const headers = new Headers(options.headers || {});
   if (!headers.has("Content-Type") && options.body) {
     headers.set("Content-Type", "application/json");

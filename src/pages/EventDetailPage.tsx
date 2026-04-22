@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -27,7 +27,7 @@ export default function EventDetailPage() {
   const navigate = useNavigate();
   const {
     events, getEventParticipants, changeEventStatus, addRound,
-    addParticipant, removeParticipant, updateParticipantRole, updateScore, deleteEvent
+    addParticipant, removeParticipant, updateParticipantRole, updateScore, deleteEvent, subscribeToEvent
   } = useData();
   const { isAdmin } = useAuth();
 
@@ -57,6 +57,11 @@ export default function EventDetailPage() {
   const [highlightRoleId, setHighlightRoleId] = useState<string>('all');
   const [confirmAction, setConfirmAction] = useState<'start' | 'end' | 'delete' | null>(null);
   const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!id) return;
+    return subscribeToEvent(id);
+  }, [id, subscribeToEvent]);
 
   if (!event) {
     return (

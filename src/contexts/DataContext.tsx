@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useRef } from 'react';
 import { EventTemplate, GameEvent, Participant, EventStatus } from '@/types';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, buildApiUrl } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface DataContextType {
@@ -23,7 +23,16 @@ interface DataContextType {
   updateParticipantRole: (eventId: string, participantId: string, roleId: string | undefined) => Promise<void>;
   updateScore: (eventId: string, participantId: string, columnName: string, value: number | string) => Promise<void>;
   getEventParticipants: (eventId: string) => Participant[];
+  subscribeToEvent: (eventId: string) => () => void;
 }
+
+type EventStreamPayload = {
+  type: 'snapshot' | 'participants_updated' | 'event_updated' | 'event_deleted';
+  eventId: string;
+  event?: GameEvent;
+  participants?: Participant[];
+  timestamp: string;
+};
 
 const DataContext = createContext<DataContextType | null>(null);
 
@@ -33,6 +42,87 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [participants, setParticipants] = useState<Record<string, Participant[]>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const eventStreamsRef = useRef<Record<string, { source: EventSource; subscribers: number }>>({});
+
+  const closeAllEventStreams = useCallback(() => {
+    const streams = eventStreamsRef.current;
+    for (const eventId of Object.keys(streams)) {
+      streams[eventId].source.close();
+    }
+    eventStreamsRef.current = {};
+  }, []);
+
+  const applyEventStreamPayload = useCallback((payload: EventStreamPayload) => {
+    if (payload.type === 'event_deleted') {
+      setEvents(prev => prev.filter(event => event.id !== payload.eventId));
+      setParticipants(prev => {
+        const { [payload.eventId]: _removed, ...rest } = prev;
+        return rest;
+      });
+      return;
+    }
+
+    if (payload.event) {
+      setEvents(prev => {
+        const exists = prev.some(event => event.id === payload.event!.id);
+        if (!exists) return [payload.event!, ...prev];
+        return prev.map(event => (event.id === payload.event!.id ? payload.event! : event));
+      });
+    }
+
+    if (Array.isArray(payload.participants)) {
+      setParticipants(prev => ({ ...prev, [payload.eventId]: payload.participants! }));
+    }
+  }, []);
+
+  const subscribeToEvent = useCallback((eventId: string) => {
+    if (!user?.id || !eventId) {
+      return () => {};
+    }
+
+    const streams = eventStreamsRef.current;
+    const existing = streams[eventId];
+    if (existing) {
+      existing.subscribers += 1;
+      return () => {
+        const current = eventStreamsRef.current[eventId];
+        if (!current) return;
+        current.subscribers -= 1;
+        if (current.subscribers <= 0) {
+          current.source.close();
+          delete eventStreamsRef.current[eventId];
+        }
+      };
+    }
+
+    const streamUrl = buildApiUrl(`/api/data/events/${eventId}/stream?userId=${encodeURIComponent(user.id)}`);
+    const source = new EventSource(streamUrl);
+    const onPayload = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as EventStreamPayload;
+        applyEventStreamPayload(payload);
+      } catch {
+        // Ignore malformed stream events to keep the connection alive.
+      }
+    };
+
+    source.addEventListener('snapshot', onPayload as EventListener);
+    source.addEventListener('participants_updated', onPayload as EventListener);
+    source.addEventListener('event_updated', onPayload as EventListener);
+    source.addEventListener('event_deleted', onPayload as EventListener);
+
+    streams[eventId] = { source, subscribers: 1 };
+
+    return () => {
+      const current = eventStreamsRef.current[eventId];
+      if (!current) return;
+      current.subscribers -= 1;
+      if (current.subscribers <= 0) {
+        current.source.close();
+        delete eventStreamsRef.current[eventId];
+      }
+    };
+  }, [applyEventStreamPayload, user?.id]);
 
   const loadBootstrap = useCallback(async () => {
     const response = await apiFetch<{
@@ -50,6 +140,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     // Data is backend-driven; only bootstrap after authentication is available.
     if (!user) {
+      closeAllEventStreams();
       setTemplates([]);
       setEvents([]);
       setParticipants({});
@@ -77,7 +168,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [loadBootstrap, user]);
+  }, [closeAllEventStreams, loadBootstrap, user]);
+
+  React.useEffect(() => {
+    return () => {
+      closeAllEventStreams();
+    };
+  }, [closeAllEventStreams]);
 
   const createTemplate = useCallback(async (t: Omit<EventTemplate, 'id' | 'createdAt'>) => {
     const response = await apiFetch<{ template: EventTemplate }>('/api/data/templates', {
@@ -212,6 +309,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       createEvent, updateEvent, deleteEvent, duplicateEvent,
       changeEventStatus, addRound,
       addParticipant, removeParticipant, updateParticipantRole, updateScore, getEventParticipants,
+      subscribeToEvent,
     }}>
       {children}
     </DataContext.Provider>
